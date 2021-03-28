@@ -1,7 +1,7 @@
 #!/bin/bash
 
 virt-install --connect=qemu:///system \
-    --network=bridge:virbr0 \
+    --network=default \
     --initrd-inject=./fedora-qiot.ks \
     --extra-args="ks=file:/fedora-qiot.ks" \
     --name=fedora-33-qiot.aarch64 \

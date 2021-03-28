@@ -8,7 +8,7 @@ timezone --utc Etc/UTC
 selinux --enforcing
 rootpw --lock --iscrypted locked
 
-bootloader --timeout=1 --append="modprobe.blacklist=vc4 iomem=relaxed strict-devmem=0"
+bootloader --timeout=1 --append="net.ifnames=0 modprobe.blacklist=vc4 iomem=relaxed strict-devmem=0"
 
 network --bootproto=dhcp --device=link --activate --onboot=on
 services --enabled=NetworkManager,sshd,rngd
@@ -19,15 +19,15 @@ autopart --nohome --noswap --type=plain
 
 # Equivalent of %include fedora-repo.ks
 # Pull from the ostree repo that was created during the compose
-ostreesetup --nogpg --osname=fedora-iot --remote=fedora-iot --url=https://dl.fedoraproject.org/iot/repo/ --ref=fedora/stable/aarch64/iot
+ostreesetup --nogpg --osname=fedora-iot --remote=fedora-iot --url=https://kojipkgs.fedoraproject.org/compose/iot/repo/ --ref=fedora/stable/${basearch}/iot
 
 reboot
 
-%post --erroronfail
+%post --erroronfail --log=/root/ks-post.log
 # Find the architecture we are on
 arch=$(uname -m)
 if [[ $arch == "armv7l" ]]; then
-	arch="armhfp"
+    arch="armhfp"
 fi
 
 # Setup Raspberry Pi firmware
@@ -35,75 +35,45 @@ if [[ $arch == "aarch64" ]] || [[ $arch == "armhfp" ]]; then
 if [[ $arch == "aarch64" ]]; then
 cp -P /usr/share/uboot/rpi_3/u-boot.bin /boot/efi/rpi3-u-boot.bin
 cp -P /usr/share/uboot/rpi_4/u-boot.bin /boot/efi/rpi4-u-boot.bin
-cat <<EOT > /boot/efi/config.txt
-# Raspberry Pi 3
-[pi3]
-kernel=rpi3-u-boot.bin
-
-# Raspberry Pi 4
-[pi4]
-kernel=rpi4-u-boot.bin
-
-# Default Fedora configs for all Raspberry Pi Revisions
-[all]
-# Put the RPi into 64 bit mode
-#arm_control=0x200
-arm_64bit=1
-
-dtparam=i2c_arm=on
-#dtparam=i2s=on
-dtparam=spi=on
-
-# Enable UART
-# Only enable UART if you're going to use it as it has speed implications
-# Serial console is ttyS0 on RPi3 and ttyAMA0 on all other variants
-# u-boot will auto detect serial and pass corrent options to kernel if enabled
-# Speed details: https://www.raspberrypi.org/forums/viewtopic.php?f=28&t=141195
-enable_uart=1
-
-# Early boot delay in the hope monitors are initialised enough to provide EDID
-bootcode_delay=1
-
-# We need this to be 32Mb to support VCHI services and drivers which use them
-# but this isn't used by mainline VC4 driver so reduce to lowest supported value
-# You need to set this to at least 80 for using the camera
-gpu_mem=32
-
-# Use eXtended firmware by default
-start_x=1
-
-# New option to allow the firmware to load upstream dtb
-# Will allow things like camera, touchscreen etc to work OOTB
-upstream_kernel=1
-
-# HAT and DT overlays. Documentation at Raspberry Pi here:
-# https://www.raspberrypi.org/documentation/configuration/device-tree.md
-# Each dtoverlay line is an individual HAT/overlay, multiple lines allowed
-# The dtoverlay=upstream must be present for Fedora kernels
-dtoverlay=miniuart-bt
-dtoverlay=adau7002-simple
-dtoverlay=upstream
-# dtoverlay=rpi-sense
-
-# Allow OS rather than firmware control CEC
-mask_gpu_interrupt1=0x100
-
-# Without this sdram runs at 400mhz, instead of 450
-# https://github.com/Hexxeh/rpi-firmware/issues/172
-audio_pwm_mode=0
-
-# Other options you can adjust for all Raspberry Pi Revisions
-# https://www.raspberrypi.org/documentation/configuration/config-txt/README.md
-# All options documented at http://elinux.org/RPiconfig
-# for more options see http://elinux.org/RPi_config.txt
-
-EOT
 else
 cp -P /usr/share/uboot/rpi_2/u-boot.bin /boot/efi/rpi2-u-boot.bin
 cp -P /usr/share/uboot/rpi_3_32b/u-boot.bin /boot/efi/rpi3-u-boot.bin
 cp -P /usr/share/uboot/rpi_4_32b/u-boot.bin /boot/efi/rpi4-u-boot.bin
 fi
 fi
+
+########## QIoT custom U-Boot ##########
+# Write custom config.txt
+cat <<EOT > /etc/fw_env.config
+# VFAT
+/boot/efi/uboot.env     0x0000          0x4000
+EOT
+
+# disable boot delay in U-Boot 
+fw_setenv bootdelay -- -2
+########## QIoT custom U-Boot ##########
+
+########## QIoT custom CONFIG.TXT ##########
+# Write custom config.txt
+cat <<EOT > /boot/efi/config.txt
+[pi3]
+kernel=rpi3-u-boot.bin
+[all]
+arm_64bit=1
+dtparam=i2c_arm=on
+dtparam=spi=on
+enable_uart=1
+bootcode_delay=1
+gpu_mem=32
+start_x=1
+upstream_kernel=1
+dtoverlay=miniuart-bt
+dtoverlay=adau7002-simple
+dtoverlay=upstream
+mask_gpu_interrupt1=0x100
+audio_pwm_mode=0
+EOT
+########## QIoT custom CONFIG.TXT ##########
 
 # Set the origin to the "main ref", distinct from /updates/ which is where bodhi writes.
 # We want consumers of this image to track the two week releases.
@@ -131,25 +101,46 @@ passwd -l root
 # Work around https://bugzilla.redhat.com/show_bug.cgi?id=1193590
 cp /etc/skel/.bash* /var/roothome
 
-# Adding customization QIoT project
-rpm-ostree install cockpit-system cockpit-ostree cockpit-podman i2c-tools
-podman pull cockpit/ws
-podman container runlabel --name cockpit-ws RUN cockpit/ws
-podman container runlabel INSTALL cockpit/ws
-systemctl enable cockpit.service
-groupadd i2cuser
-useradd -m -G wheel,i2cuser edge
-echo "edge" | passwd --stdin edge
-mkdir -p /home/edge/qiot/driver
-mkdir -p /home/edge/qiot/containers/sensor/base/test
-mkdir -p /home/edge/qiot/containers/sensor/service
-mkdir -p /home/edge/qiot/containers/edge
-echo "SUBSYSTEM==\"i2c-dev\", GROUP=\"i2cuser\", MODE=\"0660\"" | tee /etc/udev/rules.d/50-i2c.rules
+########## Adding customization QIoT project ##########
+# firewall
 systemctl disable firewalld
+
+# 'edge' user
+useradd edge
+echo "edge" | passwd --stdin edge
+usermod edge -a -G wheel
+
+# folder struct
+mkdir -p /var/home/edge/qiot/driver
+mkdir -p /var/home/edge/qiot/containers/sensor/base/test
+mkdir -p /var/home/edge/qiot/containers/sensor/service
+mkdir -p /var/home/edge/qiot/containers/edge/volume/https
+curl -LJ https://github.com/qiot-project/qiot-datahub-registration/raw/v2/src/main/resources/certs/https/client.ks -o /var/home/edge/qiot/containers/edge/volume/https/client.ks
+curl -LJ https://github.com/qiot-project/qiot-datahub-registration/raw/v2/src/main/resources/certs/https/client.ts -o /var/home/edge/qiot/containers/edge/volume/https/client.ts
+chown edge:edge -R /var/home/edge
+chmod 777 /var/home/edge/qiot/containers/edge/volume
+
+# i2c drivers
+sudo groupadd i2cuser
+sudo usermod edge -G i2cuser -a
+echo "SUBSYSTEM==\"i2c-dev\", GROUP=\"i2cuser\", MODE=\"0660\"" | tee /etc/udev/rules.d/50-i2c.rules
+rpm-ostree install i2c-tools
+
+# container engine
 podman network create qiot
+########## Adding customization QIoT project ##########
+
 
 # Remove any persistent NIC rules generated by udev
 rm -vf /etc/udev/rules.d/*persistent-net*.rules
+# And ensure that we will do DHCP on eth0 on startup
+cat > /etc/sysconfig/network-scripts/ifcfg-eth0 << EOF
+DEVICE="eth0"
+BOOTPROTO="dhcp"
+ONBOOT="yes"
+TYPE="Ethernet"
+PERSISTENT_DHCLIENT="yes"
+EOF
 
 echo "Removing random-seed so it's not the same in every image."
 rm -f /var/lib/systemd/random-seed
@@ -168,7 +159,7 @@ rm -f /var/tmp/zeros
 echo "(Don't worry -- that out-of-space error was expected.)"
 
 # For trac ticket https://pagure.io/atomic-wg/issue/128
-rm -f /etc/sysconfig/network-scripts/ifcfg-*
+rm -f /etc/sysconfig/network-scripts/ifcfg-ens3
 
 # Anaconda is writing an /etc/resolv.conf from the install environment.
 # The system should start out with an empty file, otherwise cloud-init
