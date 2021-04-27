@@ -115,8 +115,8 @@ mkdir -p /var/home/edge/qiot/driver
 mkdir -p /var/home/edge/qiot/containers/sensor/base/test
 mkdir -p /var/home/edge/qiot/containers/sensor/service
 mkdir -p /var/home/edge/qiot/containers/edge/volume/https
-curl -LJ https://github.com/qiot-project/qiot-covid19-datahub-registration/blob/main/src/main/resources/certs/https/client.ks -o /var/home/edge/qiot/containers/edge/volume/https/client.ks
-curl -LJ https://github.com/qiot-project/qiot-covid19-datahub-registration/blob/main/src/main/resources/certs/https/client.ts -o /var/home/edge/qiot/containers/edge/volume/https/client.ts
+curl -LJ https://github.com/qiot-project/qiot-covid19-datahub-registration/raw/main/src/main/resources/certs/https/client.ks -o /var/home/edge/qiot/containers/edge/volume/https/client.ks
+curl -LJ https://github.com/qiot-project/qiot-covid19-datahub-registration/raw/main/src/main/resources/certs/https/client.ts -o /var/home/edge/qiot/containers/edge/volume/https/client.ts
 chown edge:edge -R /var/home/edge
 chmod 777 /var/home/edge/qiot/containers/edge/volume
 
